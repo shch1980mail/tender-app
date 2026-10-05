@@ -30,7 +30,6 @@ items = load_json("claim_items.json", [])
 types = load_json("defect_types.json", {})
 freight = pd.DataFrame(load_json("freight.json", []))
 
-# Курс USD → RUB
 if "usd_rate" not in st.session_state:
     st.session_state.usd_rate = 90.0
 
@@ -55,29 +54,26 @@ if tab == "🚢 Фрахт":
 
     rate = st.session_state.usd_rate
 
-    # Расчёт полной стоимости в рублях
     def calc_full(row):
         if row["Тип"] == "МОРЕ":
-            more = (row["Море_USD"] or 0) * rate
-            gd = row["ЖД_RUB"] or 0
-            avto = row["Авто_RUB"] or 0
+            more = (row.get("Море_USD") or 0) * rate
+            gd = row.get("ЖД_RUB") or 0
+            avto = row.get("Авто_RUB") or 0
             return more + gd + avto
         elif row["Тип"] == "ЖД":
-            gd = (row["ЖД_USD"] or 0) * rate
-            avto = row["Авто_RUB"] or 0
+            gd = (row.get("ЖД_USD") or 0) * rate
+            avto = row.get("Авто_RUB") or 0
             return gd + avto
         return 0
 
     if not freight.empty:
         freight["Полная_RUB"] = freight.apply(calc_full, axis=1)
 
-    # Функция построения линейного графика по годам с forward fill
-    def plot_by_year(df, tip, title):
+    def plot_by_year(df, title):
         fig = go.Figure()
         for year in sorted(df["Год"].unique()):
             sub = df[df["Год"] == year].copy()
             sub = sub.set_index("Месяц").reindex(MONTHS)
-            # Forward fill для пустых месяцев
             sub["Полная_RUB"] = sub["Полная_RUB"].ffill()
             fig.add_trace(go.Scatter(
                 x=MONTHS, y=sub["Полная_RUB"],
@@ -90,31 +86,25 @@ if tab == "🚢 Фрахт":
         )
         return fig
 
-    # График 1: МОРЕ
     st.subheader("📈 Полная стоимость доставки через море (МОРЕ)")
     sub_more = freight[freight["Тип"] == "МОРЕ"]
     if not sub_more.empty:
         st.plotly_chart(
-            plot_by_year(sub_more, "МОРЕ",
-                         "Полная стоимость: Море + ЖД + Авто (RUB)"),
+            plot_by_year(sub_more, "Полная стоимость: Море + ЖД + Авто (RUB)"),
             use_container_width=True
         )
 
-    # График 2: ЖД
     st.subheader("📈 Полная стоимость доставки через ЖД (ЖД)")
     sub_zhd = freight[freight["Тип"] == "ЖД"]
     if not sub_zhd.empty:
         st.plotly_chart(
-            plot_by_year(sub_zhd, "ЖД",
-                         "Полная стоимость: ЖД + Авто (RUB)"),
+            plot_by_year(sub_zhd, "Полная стоимость: ЖД + Авто (RUB)"),
             use_container_width=True
         )
 
-    # Таблица
     with st.expander("📋 Таблица ставок"):
         st.dataframe(freight, use_container_width=True)
 
-    # Форма добавления
     st.subheader("➕ Добавить ставку")
     with st.form("freight_form"):
         c1, c2, c3 = st.columns(3)
@@ -140,15 +130,11 @@ if tab == "🚢 Фрахт":
             st.rerun()
 
 # =====================================================
-# ДАШБОРД (сетка мини-графиков по месяцам)
+# ДАШБОРД
 # =====================================================
 elif tab == "📊 Дашборд":
     st.header("📊 Дашборд")
 
-    if not claims_df := []:
-        pass
-
-    # KPI
     claims_df_rows = []
     for c in claims:
         c_items = [i for i in items if i["claim_id"] == c["id"]]
@@ -168,7 +154,6 @@ elif tab == "📊 Дашборд":
         c4.metric("Вина поставщика",
                   len(claims_df[claims_df["Причина"] == "Вина поставщика"]))
 
-    # Сетка мини-графиков: один график на каждый месяц
     st.subheader("🔧 Брак по типам — по месяцам")
 
     if items:
@@ -198,14 +183,12 @@ elif tab == "📊 Дашборд":
                     )
                     st.plotly_chart(fig, use_container_width=True)
 
-                    # Подпись: Тип — виды
                     desc = []
                     for _, r in pivot.iterrows():
                         views = sub[sub["Тип"] == r["Тип"]]["Вид"].unique()
                         desc.append(f"**{r['Тип']}**: {', '.join(views)}")
                     st.caption(" | ".join(desc))
 
-        # Сводная таблица за последний месяц
         st.subheader("📋 Сводка за последний месяц")
         last_month = months_sorted[-1]
         sub_last = df_items[df_items["Месяц"] == last_month]
@@ -216,16 +199,18 @@ elif tab == "📊 Дашборд":
         st.dataframe(summary, use_container_width=True)
 
 # =====================================================
-# ВВОД ПРЕТЕНЗИИ, СПРАВОЧНИК, ПРОДАЖИ, ЭКСПОРТ
+# ВВОД ПРЕТЕНЗИИ
 # =====================================================
 elif tab == "➕ Ввести претензию":
     st.header("➕ Новая претензия")
     month = st.text_input("Месяц (ГГГГ-ММ)", value=datetime.now().strftime("%Y-%m"))
     reason = st.radio("Причина", ["Транспортный бой", "Вина клиента", "Вина поставщика"])
     comment = st.text_area("Комментарий", "")
+
     st.subheader("Детали претензии")
     if "n_items" not in st.session_state:
         st.session_state.n_items = 1
+
     new_items = []
     for i in range(st.session_state.n_items):
         c1, c2, c3 = st.columns([3, 3, 1])
@@ -234,6 +219,7 @@ elif tab == "➕ Ввести претензию":
         q = c3.number_input("Кол-во", min_value=0, value=1, key=f"q{i}")
         if q > 0:
             new_items.append({"Тип": t, "Вид": v, "Количество": int(q)})
+
     c1, c2 = st.columns(2)
     if c1.button("➕ Добавить деталь"):
         st.session_state.n_items += 1
@@ -242,6 +228,7 @@ elif tab == "➕ Ввести претензию":
         if st.session_state.n_items > 1:
             st.session_state.n_items -= 1
             st.rerun()
+
     if st.button("💾 Сохранить претензию"):
         new_id = max([c["id"] for c in claims], default=0) + 1
         claims.append({"id": new_id, "Месяц": month, "Причина": reason,
@@ -254,6 +241,9 @@ elif tab == "➕ Ввести претензию":
         st.success(f"Претензия №{new_id} сохранена")
         st.session_state.n_items = 1
 
+# =====================================================
+# СПРАВОЧНИК
+# =====================================================
 elif tab == "⚙️ Справочник":
     st.header("⚙️ Справочник")
     new_type = st.text_input("Новый тип")
@@ -262,6 +252,7 @@ elif tab == "⚙️ Справочник":
             types[new_type] = []
             save_json("defect_types.json", types)
             st.rerun()
+
     sel_type = st.selectbox("Тип", list(types.keys()))
     new_view = st.text_input("Новый вид")
     if st.button("➕ Добавить вид") and new_view:
@@ -269,8 +260,12 @@ elif tab == "⚙️ Справочник":
             types[sel_type].append(new_view)
             save_json("defect_types.json", types)
             st.rerun()
+
     st.json(types)
 
+# =====================================================
+# ПРОДАЖИ
+# =====================================================
 elif tab == "💾 Продажи":
     st.header("💾 Продажи")
     with st.form("sales_form"):
@@ -288,11 +283,14 @@ elif tab == "💾 Продажи":
             st.success("Сохранено")
     st.dataframe(pd.DataFrame(load_json("sales.json", [])), use_container_width=True)
 
+# =====================================================
+# ЭКСПОРТ PPTX
+# =====================================================
 elif tab == "📥 Экспорт PPTX":
     st.header("📥 Экспорт")
     if st.button("Собрать PPTX"):
         prs = Presentation()
-        # Слайд 1: МОРЕ
+
         sub_more = freight[freight["Тип"] == "МОРЕ"]
         if not sub_more.empty:
             s1 = prs.slides.add_slide(prs.slide_layouts[5])
@@ -305,7 +303,7 @@ elif tab == "📥 Экспорт PPTX":
                 cd1.add_series(str(year), y["Полная_RUB"].fillna(0).tolist())
             s1.shapes.add_chart(XL_CHART_TYPE.LINE_MARKERS,
                                 Inches(0.5), Inches(1.5), Inches(9), Inches(4.5), cd1)
-        # Слайд 2: ЖД
+
         sub_zhd = freight[freight["Тип"] == "ЖД"]
         if not sub_zhd.empty:
             s2 = prs.slides.add_slide(prs.slide_layouts[5])
@@ -318,6 +316,7 @@ elif tab == "📥 Экспорт PPTX":
                 cd2.add_series(str(year), y["Полная_RUB"].fillna(0).tolist())
             s2.shapes.add_chart(XL_CHART_TYPE.LINE_MARKERS,
                                 Inches(0.5), Inches(1.5), Inches(9), Inches(4.5), cd2)
+
         prs.save("report.pptx")
         with open("report.pptx", "rb") as f:
             st.download_button("💾 Скачать", f, file_name="report.pptx",
