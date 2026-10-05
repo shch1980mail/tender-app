@@ -14,7 +14,6 @@ st.title("📊 Ежемесячные отчёты STIMUL")
 
 MONTHS = ["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"]
 
-# Цвета для типов брака (как в ваших отчётах)
 COLORS = {
     "Поддон": "#E45756",
     "Крыша": "#F58518",
@@ -73,7 +72,6 @@ if tab == "🚢 Фрахт":
         avto_rub = row.get("Авто_RUB") or 0
 
         more_rub = more_usd * rate
-        # Для МОРЕ: ЖД в рублях. Для ЖД: ЖД в USD → пересчёт.
         if row["Тип"] == "МОРЕ":
             gd_rub_calc = gd_rub
         else:
@@ -91,8 +89,6 @@ if tab == "🚢 Фрахт":
         freight[["Море_USD_знач", "Море_RUB",
                  "ЖД_USD_знач", "ЖД_RUB_пересчёт",
                  "Авто_RUB_знач"]] = freight.apply(calc_components, axis=1)
-
-        # Полные стоимости
         freight["Полный_МОРЕ_RUB"] = freight["Море_RUB"] + freight["ЖД_RUB_пересчёт"] + freight["Авто_RUB_знач"]
         freight["Полный_ЖД_RUB"] = freight["ЖД_RUB_пересчёт"] + freight["Авто_RUB_знач"]
 
@@ -107,76 +103,71 @@ if tab == "🚢 Фрахт":
                 name=str(year), mode="lines+markers"
             ))
         fig.update_layout(
-            title=title, height=450,
-            xaxis_title="Месяц", yaxis_title=y_title,
-            hovermode="x unified"
+            title=title,
+            height=350,
+            xaxis_title="Месяц",
+            yaxis_title=y_title,
+            hovermode="x unified",
+            margin=dict(l=40, r=20, t=50, b=60)
         )
+        fig.update_xaxes(tickangle=-90)
         return fig
 
-    # 1. Полный по морю (RUB)
     st.subheader("1. Полная стоимость доставки через море (RUB)")
     sub = freight[freight["Тип"] == "МОРЕ"]
     if not sub.empty:
-        st.plotly_chart(
-            plot_by_year(sub, "Полный_МОРЕ_RUB",
-                         "Море + ЖД + Авто (RUB)"),
-            use_container_width=True
-        )
+        st.plotly_chart(plot_by_year(sub, "Полный_МОРЕ_RUB",
+                                     "Море + ЖД + Авто (RUB)"),
+                        use_container_width=True)
 
-    # 2. Полный по ЖД (RUB)
     st.subheader("2. Полная стоимость доставки через ЖД (RUB)")
     sub = freight[freight["Тип"] == "ЖД"]
     if not sub.empty:
-        st.plotly_chart(
-            plot_by_year(sub, "Полный_ЖД_RUB",
-                         "ЖД + Авто (RUB)"),
-            use_container_width=True
-        )
+        st.plotly_chart(plot_by_year(sub, "Полный_ЖД_RUB",
+                                     "ЖД + Авто (RUB)"),
+                        use_container_width=True)
 
-    # 3. Только море (RUB)
     st.subheader("3. Только морской фрахт (RUB)")
     sub = freight[freight["Тип"] == "МОРЕ"]
     if not sub.empty:
-        st.plotly_chart(
-            plot_by_year(sub, "Море_RUB",
-                         "Море (USD × курс месяца → RUB)"),
-            use_container_width=True
-        )
+        st.plotly_chart(plot_by_year(sub, "Море_RUB",
+                                     "Море (USD × курс месяца → RUB)"),
+                        use_container_width=True)
 
-    # 4. Только ЖД (RUB)
     st.subheader("4. Только ЖД фрахт (RUB)")
     sub = freight[freight["Тип"] == "ЖД"]
     if not sub.empty:
-        st.plotly_chart(
-            plot_by_year(sub, "ЖД_RUB_пересчёт",
-                         "ЖД (USD × курс месяца → RUB)"),
-            use_container_width=True
-        )
+        st.plotly_chart(plot_by_year(sub, "ЖД_RUB_пересчёт",
+                                     "ЖД (USD × курс месяца → RUB)"),
+                        use_container_width=True)
 
-    # 5. Только море (USD)
     st.subheader("5. Только морской фрахт (USD)")
     sub = freight[freight["Тип"] == "МОРЕ"]
     if not sub.empty:
-        st.plotly_chart(
-            plot_by_year(sub, "Море_USD_знач",
-                         "Море (USD)", y_title="USD"),
-            use_container_width=True
-        )
+        st.plotly_chart(plot_by_year(sub, "Море_USD_знач",
+                                     "Море (USD)", y_title="USD"),
+                        use_container_width=True)
 
-    # 6. Только ЖД (USD)
     st.subheader("6. Только ЖД фрахт (USD)")
     sub = freight[freight["Тип"] == "ЖД"]
     if not sub.empty:
-        st.plotly_chart(
-            plot_by_year(sub, "ЖД_USD_знач",
-                         "ЖД (USD)", y_title="USD"),
-            use_container_width=True
-        )
+        st.plotly_chart(plot_by_year(sub, "ЖД_USD_знач",
+                                     "ЖД (USD)", y_title="USD"),
+                        use_container_width=True)
 
     with st.expander("📋 Таблица ставок"):
-        st.dataframe(freight, use_container_width=True)
+        show_cols = ["Месяц","Год","Тип","Море_USD","ЖД_USD","ЖД_RUB","Авто_RUB"]
+        st.dataframe(
+            freight[[c for c in show_cols if c in freight.columns]],
+            use_container_width=True, height=300
+        )
 
-    # Форма для курсов
+    with st.expander("📋 Таблица курсов"):
+        rates_df = pd.DataFrame(rates)
+        if not rates_df.empty:
+            rates_df = rates_df.sort_values(["Год","Месяц"])
+            st.dataframe(rates_df, use_container_width=True, height=250)
+
     st.subheader("💱 Курсы USD/RUB по месяцам")
     with st.form("rates_form"):
         c1, c2, c3 = st.columns(3)
@@ -193,7 +184,7 @@ if tab == "🚢 Фрахт":
             st.rerun()
 
 # =====================================================
-# ДАШБОРД — сетка цветных мини-графиков
+# ДАШБОРД
 # =====================================================
 elif tab == "📊 Дашборд":
     st.header("📊 Дашборд")
@@ -241,16 +232,20 @@ elif tab == "📊 Дашборд":
                         marker_color=colors
                     ))
                     fig.update_layout(
-                        title=f"{month}", height=300,
-                        xaxis_tickangle=-40, showlegend=False,
-                        margin=dict(l=20, r=20, t=40, b=80)
+                        title=f"{month}", height=280,
+                        showlegend=False,
+                        margin=dict(l=20, r=20, t=40, b=90)
                     )
+                    fig.update_xaxes(tickangle=-90)
                     st.plotly_chart(fig, use_container_width=True)
 
                     desc = []
                     for _, r in pivot.iterrows():
                         views = sub[sub["Тип"] == r["Тип"]]["Вид"].unique()
-                        desc.append(f"**{r['Тип']}**: {', '.join(views)}")
+                        views_short = ", ".join(list(views)[:3])
+                        if len(views) > 3:
+                            views_short += "…"
+                        desc.append(f"**{r['Тип']}**: {views_short}")
                     st.caption(" | ".join(desc))
 
         st.subheader("📋 Сводка за последний месяц")
@@ -260,7 +255,7 @@ elif tab == "📊 Дашборд":
             Кол_во=("Количество", "sum"),
             Виды=("Вид", lambda x: ", ".join(sorted(set(x))))
         ).reset_index().sort_values("Кол_во", ascending=False)
-        st.dataframe(summary, use_container_width=True)
+        st.dataframe(summary, use_container_width=True, height=250)
 
 # =====================================================
 # ВВОД ПРЕТЕНЗИИ
@@ -345,7 +340,8 @@ elif tab == "💾 Продажи":
             data.sort(key=lambda r: r["Месяц"])
             save_json("sales.json", data)
             st.success("Сохранено")
-    st.dataframe(pd.DataFrame(load_json("sales.json", [])), use_container_width=True)
+    st.dataframe(pd.DataFrame(load_json("sales.json", [])),
+                 use_container_width=True, height=300)
 
 # =====================================================
 # ЭКСПОРТ PPTX
@@ -355,7 +351,6 @@ elif tab == "📥 Экспорт PPTX":
     if st.button("Собрать PPTX"):
         prs = Presentation()
 
-        # Слайд 1: Полный по морю RUB
         sub = freight[freight["Тип"] == "МОРЕ"]
         if not sub.empty:
             s1 = prs.slides.add_slide(prs.slide_layouts[5])
@@ -369,7 +364,6 @@ elif tab == "📥 Экспорт PPTX":
             s1.shapes.add_chart(XL_CHART_TYPE.LINE_MARKERS,
                                 Inches(0.5), Inches(1.5), Inches(9), Inches(4.5), cd1)
 
-        # Слайд 2: Полный по ЖД RUB
         sub = freight[freight["Тип"] == "ЖД"]
         if not sub.empty:
             s2 = prs.slides.add_slide(prs.slide_layouts[5])
@@ -383,7 +377,6 @@ elif tab == "📥 Экспорт PPTX":
             s2.shapes.add_chart(XL_CHART_TYPE.LINE_MARKERS,
                                 Inches(0.5), Inches(1.5), Inches(9), Inches(4.5), cd2)
 
-        # Слайд 3: Только море USD
         sub = freight[freight["Тип"] == "МОРЕ"]
         if not sub.empty:
             s3 = prs.slides.add_slide(prs.slide_layouts[5])
@@ -397,7 +390,6 @@ elif tab == "📥 Экспорт PPTX":
             s3.shapes.add_chart(XL_CHART_TYPE.LINE_MARKERS,
                                 Inches(0.5), Inches(1.5), Inches(9), Inches(4.5), cd3)
 
-        # Слайд 4: Только ЖД USD
         sub = freight[freight["Тип"] == "ЖД"]
         if not sub.empty:
             s4 = prs.slides.add_slide(prs.slide_layouts[5])
