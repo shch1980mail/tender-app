@@ -1,5 +1,4 @@
-streamlit
-pandas
+dash
 plotly
-python-pptx
-openpyxl
+pandas
+gunicorn
