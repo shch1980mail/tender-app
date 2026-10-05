@@ -100,17 +100,25 @@ if tab == "🚢 Фрахт":
             sub[value_col] = sub[value_col].ffill()
             fig.add_trace(go.Scatter(
                 x=MONTHS, y=sub[value_col],
-                name=str(year), mode="lines+markers"
+                name=str(year), mode="lines+markers",
+                line=dict(width=2),
+                marker=dict(size=6)
             ))
         fig.update_layout(
             title=title,
-            height=350,
-            xaxis_title="Месяц",
+            height=300,
+            xaxis_title=None,
             yaxis_title=y_title,
             hovermode="x unified",
-            margin=dict(l=40, r=20, t=50, b=60)
+            margin=dict(l=30, r=10, t=40, b=70)
         )
-        fig.update_xaxes(tickangle=-90)
+        fig.update_xaxes(
+            tickangle=-90,
+            tickmode="array",
+            tickvals=MONTHS,
+            ticktext=MONTHS,
+            range=[-0.5, 11.5]
+        )
         return fig
 
     st.subheader("1. Полная стоимость доставки через море (RUB)")
@@ -232,11 +240,15 @@ elif tab == "📊 Дашборд":
                         marker_color=colors
                     ))
                     fig.update_layout(
-                        title=f"{month}", height=280,
+                        title=f"{month}", height=260,
                         showlegend=False,
-                        margin=dict(l=20, r=20, t=40, b=90)
+                        bargap=0.2,
+                        margin=dict(l=10, r=10, t=35, b=80)
                     )
-                    fig.update_xaxes(tickangle=-90)
+                    fig.update_xaxes(
+                        tickangle=-90,
+                        range=[-0.5, len(pivot) - 0.5]
+                    )
                     st.plotly_chart(fig, use_container_width=True)
 
                     desc = []
