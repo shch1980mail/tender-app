@@ -14,6 +14,19 @@ st.title("📊 Ежемесячные отчёты STIMUL")
 
 MONTHS = ["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"]
 
+# Цвета для типов брака (как в ваших отчётах)
+COLORS = {
+    "Поддон": "#E45756",
+    "Крыша": "#F58518",
+    "Экран": "#4C78A8",
+    "Стекло": "#54A24B",
+    "Профиль": "#EECA3B",
+    "Панель": "#72B7B2",
+    "Некомплект": "#B279A2",
+    "Центральная стойка": "#9D755D",
+    "Прочее": "#BAB0AC",
+}
+
 def load_json(path, default):
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
@@ -29,9 +42,7 @@ claims = load_json("claims.json", [])
 items = load_json("claim_items.json", [])
 types = load_json("defect_types.json", {})
 freight = pd.DataFrame(load_json("freight.json", []))
-
-if "usd_rate" not in st.session_state:
-    st.session_state.usd_rate = 90.0
+rates = load_json("rates.json", [])
 
 tab = st.sidebar.radio("Раздел", [
     "📊 Дашборд",
@@ -48,89 +59,141 @@ tab = st.sidebar.radio("Раздел", [
 if tab == "🚢 Фрахт":
     st.header("🚢 Стоимость доставки в Новосибирск")
 
-    st.sidebar.subheader("Курс USD → RUB")
-    st.session_state.usd_rate = st.sidebar.number_input(
-        "Курс", value=st.session_state.usd_rate, step=1.0)
+    def get_rate(month, year):
+        for r in rates:
+            if r["Месяц"] == month and r["Год"] == year:
+                return r["Курс"]
+        return 90.0
 
-    rate = st.session_state.usd_rate
+    def calc_components(row):
+        rate = get_rate(row["Месяц"], row["Год"])
+        more_usd = row.get("Море_USD") or 0
+        gd_usd = row.get("ЖД_USD") or 0
+        gd_rub = row.get("ЖД_RUB") or 0
+        avto_rub = row.get("Авто_RUB") or 0
 
-    def calc_full(row):
+        more_rub = more_usd * rate
+        # Для МОРЕ: ЖД в рублях. Для ЖД: ЖД в USD → пересчёт.
         if row["Тип"] == "МОРЕ":
-            more = (row.get("Море_USD") or 0) * rate
-            gd = row.get("ЖД_RUB") or 0
-            avto = row.get("Авто_RUB") or 0
-            return more + gd + avto
-        elif row["Тип"] == "ЖД":
-            gd = (row.get("ЖД_USD") or 0) * rate
-            avto = row.get("Авто_RUB") or 0
-            return gd + avto
-        return 0
+            gd_rub_calc = gd_rub
+        else:
+            gd_rub_calc = gd_usd * rate
+
+        return pd.Series({
+            "Море_USD_знач": more_usd,
+            "Море_RUB": more_rub,
+            "ЖД_USD_знач": gd_usd,
+            "ЖД_RUB_пересчёт": gd_rub_calc,
+            "Авто_RUB_знач": avto_rub,
+        })
 
     if not freight.empty:
-        freight["Полная_RUB"] = freight.apply(calc_full, axis=1)
+        freight[["Море_USD_знач", "Море_RUB",
+                 "ЖД_USD_знач", "ЖД_RUB_пересчёт",
+                 "Авто_RUB_знач"]] = freight.apply(calc_components, axis=1)
 
-    def plot_by_year(df, title):
+        # Полные стоимости
+        freight["Полный_МОРЕ_RUB"] = freight["Море_RUB"] + freight["ЖД_RUB_пересчёт"] + freight["Авто_RUB_знач"]
+        freight["Полный_ЖД_RUB"] = freight["ЖД_RUB_пересчёт"] + freight["Авто_RUB_знач"]
+
+    def plot_by_year(df, value_col, title, y_title="RUB"):
         fig = go.Figure()
         for year in sorted(df["Год"].unique()):
             sub = df[df["Год"] == year].copy()
             sub = sub.set_index("Месяц").reindex(MONTHS)
-            sub["Полная_RUB"] = sub["Полная_RUB"].ffill()
+            sub[value_col] = sub[value_col].ffill()
             fig.add_trace(go.Scatter(
-                x=MONTHS, y=sub["Полная_RUB"],
+                x=MONTHS, y=sub[value_col],
                 name=str(year), mode="lines+markers"
             ))
         fig.update_layout(
             title=title, height=450,
-            xaxis_title="Месяц", yaxis_title="RUB",
+            xaxis_title="Месяц", yaxis_title=y_title,
             hovermode="x unified"
         )
         return fig
 
-    st.subheader("📈 Полная стоимость доставки через море (МОРЕ)")
-    sub_more = freight[freight["Тип"] == "МОРЕ"]
-    if not sub_more.empty:
+    # 1. Полный по морю (RUB)
+    st.subheader("1. Полная стоимость доставки через море (RUB)")
+    sub = freight[freight["Тип"] == "МОРЕ"]
+    if not sub.empty:
         st.plotly_chart(
-            plot_by_year(sub_more, "Полная стоимость: Море + ЖД + Авто (RUB)"),
+            plot_by_year(sub, "Полный_МОРЕ_RUB",
+                         "Море + ЖД + Авто (RUB)"),
             use_container_width=True
         )
 
-    st.subheader("📈 Полная стоимость доставки через ЖД (ЖД)")
-    sub_zhd = freight[freight["Тип"] == "ЖД"]
-    if not sub_zhd.empty:
+    # 2. Полный по ЖД (RUB)
+    st.subheader("2. Полная стоимость доставки через ЖД (RUB)")
+    sub = freight[freight["Тип"] == "ЖД"]
+    if not sub.empty:
         st.plotly_chart(
-            plot_by_year(sub_zhd, "Полная стоимость: ЖД + Авто (RUB)"),
+            plot_by_year(sub, "Полный_ЖД_RUB",
+                         "ЖД + Авто (RUB)"),
+            use_container_width=True
+        )
+
+    # 3. Только море (RUB)
+    st.subheader("3. Только морской фрахт (RUB)")
+    sub = freight[freight["Тип"] == "МОРЕ"]
+    if not sub.empty:
+        st.plotly_chart(
+            plot_by_year(sub, "Море_RUB",
+                         "Море (USD × курс месяца → RUB)"),
+            use_container_width=True
+        )
+
+    # 4. Только ЖД (RUB)
+    st.subheader("4. Только ЖД фрахт (RUB)")
+    sub = freight[freight["Тип"] == "ЖД"]
+    if not sub.empty:
+        st.plotly_chart(
+            plot_by_year(sub, "ЖД_RUB_пересчёт",
+                         "ЖД (USD × курс месяца → RUB)"),
+            use_container_width=True
+        )
+
+    # 5. Только море (USD)
+    st.subheader("5. Только морской фрахт (USD)")
+    sub = freight[freight["Тип"] == "МОРЕ"]
+    if not sub.empty:
+        st.plotly_chart(
+            plot_by_year(sub, "Море_USD_знач",
+                         "Море (USD)", y_title="USD"),
+            use_container_width=True
+        )
+
+    # 6. Только ЖД (USD)
+    st.subheader("6. Только ЖД фрахт (USD)")
+    sub = freight[freight["Тип"] == "ЖД"]
+    if not sub.empty:
+        st.plotly_chart(
+            plot_by_year(sub, "ЖД_USD_знач",
+                         "ЖД (USD)", y_title="USD"),
             use_container_width=True
         )
 
     with st.expander("📋 Таблица ставок"):
         st.dataframe(freight, use_container_width=True)
 
-    st.subheader("➕ Добавить ставку")
-    with st.form("freight_form"):
+    # Форма для курсов
+    st.subheader("💱 Курсы USD/RUB по месяцам")
+    with st.form("rates_form"):
         c1, c2, c3 = st.columns(3)
         m = c1.selectbox("Месяц", MONTHS)
         g = c2.number_input("Год", min_value=2024, max_value=2030, value=2026)
-        t = c3.selectbox("Тип", ["МОРЕ", "ЖД"])
-        c4, c5, c6 = st.columns(3)
-        more_usd = c4.number_input("Море, USD", value=0.0, step=10.0)
-        gd_usd = c5.number_input("ЖД, USD", value=0.0, step=10.0)
-        gd_rub = c5.number_input("ЖД, RUB", value=0.0, step=1000.0)
-        avto_rub = c6.number_input("Авто, RUB", value=0.0, step=1000.0)
-        if st.form_submit_button("💾 Сохранить"):
-            new_row = {"Месяц": m, "Год": int(g), "Тип": t,
-                       "Море_USD": more_usd or None,
-                       "ЖД_USD": gd_usd or None,
-                       "ЖД_RUB": gd_rub or None,
-                       "Авто_RUB": avto_rub or None}
-            data = load_json("freight.json", [])
-            data = [r for r in data if not (r["Месяц"] == m and r["Год"] == int(g) and r["Тип"] == t)]
-            data.append(new_row)
-            save_json("freight.json", data)
-            st.success(f"Ставка за {m} {g} ({t}) сохранена")
+        k = c3.number_input("Курс", value=84.0, step=0.01)
+        if st.form_submit_button("💾 Сохранить курс"):
+            data = load_json("rates.json", [])
+            data = [r for r in data if not (r["Месяц"] == m and r["Год"] == int(g))]
+            data.append({"Месяц": m, "Год": int(g), "Курс": k})
+            data.sort(key=lambda r: (r["Год"], MONTHS.index(r["Месяц"])))
+            save_json("rates.json", data)
+            st.success(f"Курс за {m} {g} сохранён")
             st.rerun()
 
 # =====================================================
-# ДАШБОРД
+# ДАШБОРД — сетка цветных мини-графиков
 # =====================================================
 elif tab == "📊 Дашборд":
     st.header("📊 Дашборд")
@@ -171,10 +234,11 @@ elif tab == "📊 Дашборд":
                     pivot = sub.groupby("Тип")["Количество"].sum().reset_index()
                     pivot = pivot.sort_values("Количество", ascending=False)
 
+                    colors = [COLORS.get(t, "#BAB0AC") for t in pivot["Тип"]]
                     fig = go.Figure(go.Bar(
                         x=pivot["Тип"], y=pivot["Количество"],
                         text=pivot["Количество"], textposition="outside",
-                        marker_color="#4C78A8"
+                        marker_color=colors
                     ))
                     fig.update_layout(
                         title=f"{month}", height=300,
@@ -291,31 +355,61 @@ elif tab == "📥 Экспорт PPTX":
     if st.button("Собрать PPTX"):
         prs = Presentation()
 
-        sub_more = freight[freight["Тип"] == "МОРЕ"]
-        if not sub_more.empty:
+        # Слайд 1: Полный по морю RUB
+        sub = freight[freight["Тип"] == "МОРЕ"]
+        if not sub.empty:
             s1 = prs.slides.add_slide(prs.slide_layouts[5])
-            s1.shapes.title.text = "Полная стоимость: МОРЕ (RUB)"
+            s1.shapes.title.text = "Полная стоимость: Море (RUB)"
             cd1 = CategoryChartData()
             cd1.categories = MONTHS
-            for year in sorted(sub_more["Год"].unique()):
-                y = sub_more[sub_more["Год"] == year].set_index("Месяц").reindex(MONTHS)
-                y["Полная_RUB"] = y["Полная_RUB"].ffill()
-                cd1.add_series(str(year), y["Полная_RUB"].fillna(0).tolist())
+            for year in sorted(sub["Год"].unique()):
+                y = sub[sub["Год"] == year].set_index("Месяц").reindex(MONTHS)
+                y["Полный_МОРЕ_RUB"] = y["Полный_МОРЕ_RUB"].ffill()
+                cd1.add_series(str(year), y["Полный_МОРЕ_RUB"].fillna(0).tolist())
             s1.shapes.add_chart(XL_CHART_TYPE.LINE_MARKERS,
                                 Inches(0.5), Inches(1.5), Inches(9), Inches(4.5), cd1)
 
-        sub_zhd = freight[freight["Тип"] == "ЖД"]
-        if not sub_zhd.empty:
+        # Слайд 2: Полный по ЖД RUB
+        sub = freight[freight["Тип"] == "ЖД"]
+        if not sub.empty:
             s2 = prs.slides.add_slide(prs.slide_layouts[5])
             s2.shapes.title.text = "Полная стоимость: ЖД (RUB)"
             cd2 = CategoryChartData()
             cd2.categories = MONTHS
-            for year in sorted(sub_zhd["Год"].unique()):
-                y = sub_zhd[sub_zhd["Год"] == year].set_index("Месяц").reindex(MONTHS)
-                y["Полная_RUB"] = y["Полная_RUB"].ffill()
-                cd2.add_series(str(year), y["Полная_RUB"].fillna(0).tolist())
+            for year in sorted(sub["Год"].unique()):
+                y = sub[sub["Год"] == year].set_index("Месяц").reindex(MONTHS)
+                y["Полный_ЖД_RUB"] = y["Полный_ЖД_RUB"].ffill()
+                cd2.add_series(str(year), y["Полный_ЖД_RUB"].fillna(0).tolist())
             s2.shapes.add_chart(XL_CHART_TYPE.LINE_MARKERS,
                                 Inches(0.5), Inches(1.5), Inches(9), Inches(4.5), cd2)
+
+        # Слайд 3: Только море USD
+        sub = freight[freight["Тип"] == "МОРЕ"]
+        if not sub.empty:
+            s3 = prs.slides.add_slide(prs.slide_layouts[5])
+            s3.shapes.title.text = "Только море (USD)"
+            cd3 = CategoryChartData()
+            cd3.categories = MONTHS
+            for year in sorted(sub["Год"].unique()):
+                y = sub[sub["Год"] == year].set_index("Месяц").reindex(MONTHS)
+                y["Море_USD_знач"] = y["Море_USD_знач"].ffill()
+                cd3.add_series(str(year), y["Море_USD_знач"].fillna(0).tolist())
+            s3.shapes.add_chart(XL_CHART_TYPE.LINE_MARKERS,
+                                Inches(0.5), Inches(1.5), Inches(9), Inches(4.5), cd3)
+
+        # Слайд 4: Только ЖД USD
+        sub = freight[freight["Тип"] == "ЖД"]
+        if not sub.empty:
+            s4 = prs.slides.add_slide(prs.slide_layouts[5])
+            s4.shapes.title.text = "Только ЖД (USD)"
+            cd4 = CategoryChartData()
+            cd4.categories = MONTHS
+            for year in sorted(sub["Год"].unique()):
+                y = sub[sub["Год"] == year].set_index("Месяц").reindex(MONTHS)
+                y["ЖД_USD_знач"] = y["ЖД_USD_знач"].ffill()
+                cd4.add_series(str(year), y["ЖД_USD_знач"].fillna(0).tolist())
+            s4.shapes.add_chart(XL_CHART_TYPE.LINE_MARKERS,
+                                Inches(0.5), Inches(1.5), Inches(9), Inches(4.5), cd4)
 
         prs.save("report.pptx")
         with open("report.pptx", "rb") as f:
